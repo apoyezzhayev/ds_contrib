@@ -1,0 +1,9 @@
+project:
+  output-dir: _docs
+
+website:
+  title: "ds_contrib"
+  site-url: "https://apoyezzhayev.github.io/ds_contrib"
+  description: "Tools for visualization and exploration of data"
+  repo-branch: main
+  repo-url: "https://github.com/apoyezzhayev/ds_contrib"
