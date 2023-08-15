@@ -1,0 +1,37 @@
+{
+  "detections": {
+    "desc": "Detections of different distresses and objects in the frame processed by client device",
+    "path": "detections.json"
+  },
+  "device": {
+    "desc": "Device information, camera params, etc.",
+    "path": "device.txt"
+  },
+  "gps": { "desc": "GPS information from the device", "path": "gps.csv" },
+  "heading": {
+    "desc": "Heading (direction) information from the device",
+    "path": "heading.csv"
+  },
+  "motion": {
+    "desc": "Motion information from the device, e.g. acceleration, rotation, etc.",
+    "path": "motion.csv"
+  },
+  "frames_wide": {
+    "desc": "Frames captured by the wide camera (main camera with higher quality and lower fps), including timestamp, exposure, iso and system time",
+    "path": "times_full_2.json"
+  },
+  "frames_ultrawide": {
+    "desc": "Frames captured by the ultra wide camera (wider camera with lower quality and higher fps), including timestamp, exposure, iso and system time",
+    "path": "times_full.json"
+  },
+  "video_wide": {
+    "desc": "Video captured by the wide camera (main camera with higher quality and lower fps)",
+    "path": "video_2",
+    "coded": "mp4"
+  },
+  "video_ultrawide": {
+    "desc": "Video captured by the ultra wide camera (wider camera with lower quality and higher fps)",
+    "path": "video",
+    "coded": "mp4"
+  }
+}

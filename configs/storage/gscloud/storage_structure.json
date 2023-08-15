@@ -1,0 +1,44 @@
+{
+  "pipeline_data": {
+    "desc": "intermediate data of pipeline, it is passed between steps of pipeline and may be used for debugging",
+    "path": "roadly-{environment}-standard-pipelines/pci_oper_data/storage-{storage_uuid}/",
+    "flat_id": "pipeline_root",
+    "subdirs": {
+      "pipeline_storage": {
+        "desc": "RDA intermediate data, that is managed by `pipeline_storage` inside rda app",
+        "path": "pipeline_storage/test-1/",
+        "flat_id": "pipeline_storage"
+      },
+      "recslam_data": {
+        "desc": "recslam data, that is used for recslam",
+        "path": "recslam_data/",
+        "flat_id": "recslam"
+      },
+      "tmp": {
+        "desc": "temporary data of unkown purpose, may be images after split?",
+        "path": "tmp/",
+        "flat_id": "tmp"
+      }
+    }
+  },
+  "modules_data": {
+    "desc": "data of modules, that is passed between modules",
+    "path": "roadly-{environment}-standard-pipelines/pipeline-{pipeline_uuid}/",
+    "flat_id": "steps"
+  },
+  "persistent_data": {
+    "desc": "persistent data of pipeline, that was must be preserved between pipeline runs",
+    "path": "roadly-{environment}-{coldline_name}-persistent/pipeline-{pipeline_uuid}/",
+    "flat_id": "persistent"
+  },
+  "frontend": {
+    "desc": "data of pipeline, that was written by `app_storage` into s3 storage used for frontend",
+    "path": "roadly-{environment}-{coldline_name}-rda/test-1/{storage_uuid}/",
+    "flat_id": "frontend"
+  },
+  "raw_recslam": {
+    "desc": "raw recslam data, that is written by recslam",
+    "path": "roadly-{environment}-standard-videos/{video_prefix}",
+    "flat_id": "raw_recslam"
+  }
+}

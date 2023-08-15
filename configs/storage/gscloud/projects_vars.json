@@ -1,0 +1,12 @@
+{
+  "dev": {
+    "project": "roadly-project-dev",
+    "env": "dev",
+    "coldline_name": "standard"
+  },
+  "stable": {
+    "project": "earnest-radio-347914",
+    "env": "stable",
+    "coldline_name": "coldline"
+  }
+}
