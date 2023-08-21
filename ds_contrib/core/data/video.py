@@ -2,13 +2,12 @@
 
 # %% ../../../nbs/core/03_video.ipynb 3
 from __future__ import annotations
+
 from pathlib import Path
-import os
-from typing import Iterable
-import re
-from ..utils import Iterifiable, iterify
+
 import cv2
 from tqdm.auto import tqdm
+
 from ..paths import PathLike
 
 # %% auto 0

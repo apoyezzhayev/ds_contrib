@@ -8,6 +8,7 @@ website:
           - core/01_paths.ipynb
           - core/02_plotting.ipynb
           - core/03_video.ipynb
+          - core/file_structure.ipynb
       - section: tools
         contents:
           - tools/gscloud_browser.ipynb
