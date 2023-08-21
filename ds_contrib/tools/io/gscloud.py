@@ -451,7 +451,10 @@ class GSBrowser:
         return resolved_path
 
     def download_blob(
-        self, blob: Blob, destination_file_name: PathLike = None, exists_ok=False
+        self,
+        blob: Blob,
+        destination_file_name: PathLike = None,
+        existing_handling: Literal["skip", "overwrite", "raise"] = "skip",
     ):
         """Download blob to local file
 
@@ -463,8 +466,11 @@ class GSBrowser:
             blob to download
         destination_file_name : PathLike, optional
             local file path to download blob to, if None, then use default path which corresponds to {download_dir}/{prefix}, by default None
-        exists_ok : bool, optional
-            if True, then skip downloading if file already exists, if False then raise FileExistsError, by default False
+        existing_handling : Literal[&quot;skip&quot;, &quot;overwrite&quot;, &quot;raise&quot;], optional
+            how to handle existing files:
+                - &#39;skip&#39; - skip existing files
+                - &#39;overwrite&#39; - overwrite existing files
+                - &#39;raise&#39; - raise error if file already exists, by default &#39;skip&#39;
 
         Raises
         ------
@@ -473,27 +479,32 @@ class GSBrowser:
         """
         local_path = self._prepare_path(destination_file_name, blob)
         if local_path.exists():
-            if not exists_ok:
+            if existing_handling == "skip":
+                logger.warning(f"File {local_path} already exists, skipping")
+                return
+            elif existing_handling == "overwrite":
+                logger.info(f"File {local_path} already exists, overwriting")
+            elif existing_handling == "raise":
                 raise FileExistsError(f"File {local_path} already exists")
             else:
-                logger.warning(f"File {local_path} already exists, skipping")
-        else:
-            logger.info(
-                f"Downloading file from URI: `{blob.name}` to path: `{local_path}`"
-            )
-            try:
-                with open(local_path, "wb") as file_obj:
-                    self.storage_client.download_blob_to_file(blob, file_obj)
-            except resumable_media.DataCorruption:
-                # Delete the corrupt downloaded file.
-                os.remove(local_path)
-                raise
+                raise ValueError(
+                    f"Unknown existing_handling strategy: {existing_handling}"
+                )
+
+        logger.info(f"Downloading file from URI: `{blob.name}` to path: `{local_path}`")
+        try:
+            with open(local_path, "wb") as file_obj:
+                self.storage_client.download_blob_to_file(blob, file_obj)
+        except resumable_media.DataCorruption:
+            # Delete the corrupt downloaded file.
+            os.remove(local_path)
+            raise
 
     def download_file(
         self,
         context: GSBrowserContext,
         local_path: PathLike = None,
-        exists_ok=False,
+        existing_handling: Literal["skip", "overwrite", "raise"] = "skip",
     ):
         """Download a single file from GCP from context to local file
 
@@ -503,43 +514,61 @@ class GSBrowser:
             context to download from, if None, then current context is used, by default None
         local_path : PathLike, optional
             local file path to download blob to, if None, then use default path which corresponds to {download_dir}/{prefix}, by default None
-        exists_ok : bool, optional
-            if True, then skip downloading if file already exists, if False then raise FileExistsError, by default False
+        existing_handling : Literal[&quot;skip&quot;, &quot;overwrite&quot;, &quot;raise&quot;], optional
+            how to handle existing files:
+                - &#39;skip&#39; - skip existing files
+                - &#39;overwrite&#39; - overwrite existing files
+                - &#39;raise&#39; - raise error if file already exists, by default &#39;skip&#39;
         """
         blobs = self.list_blobs(context=context, recursive=False, as_dir=False)
         for blob in blobs:
-            self.download_blob(blob, local_path, exists_ok)
+            self.download_blob(blob, local_path, existing_handling)
 
-    def _prepare_local_paths(
+    def get_local_paths_mapping(
         self,
-        contexts: Iterifiable[GSBrowserContextDTO],
-        target_root: PathLike = None,
+        contexts: Iterifiable[GSBrowserContext],
+        local_root: PathLike = None,
         remote_root: PathLike = None,
-    ) -> list[Path]:
-        target_root = (
-            Path(target_root).absolute().resolve()
-            if target_root
-            else self.downloads_path
+    ) -> dict[GSBrowserContextDTO, Path]:
+        """Maps remote paths (Contexts) to local paths
+
+
+        Parameters
+        ----------
+        contexts : Iterifiable[GSBrowserContextDTO]
+            remote paths to map
+        local_root : PathLike, optional
+            local root path, if None, then use default path which corresponds to {download_dir}/{prefix}, by default None
+        remote_root : PathLike, optional
+            remote root path, if None, then shared root of all remote paths is used, by default None
+
+        Returns
+        -------
+        list[Path]
+            list of local paths
+        """
+        local_root = (
+            Path(local_root).absolute().resolve() if local_root else self.downloads_path
         )
-        absolute_remote_paths = list(
-            map(lambda p: Path("/" + p.path), listify(contexts))
-        )
+        contexts = [self._parse_context(c) for c in listify(contexts)]
+        absolute_remote_paths = list(map(lambda p: Path("/" + p.path), contexts))
         remote_root = (
             remote_root
             if remote_root
             else shared_root(absolute_remote_paths, only_files=True)
         )
-        local_paths = [
-            target_root / p.relative_to(remote_root) for p in absolute_remote_paths
-        ]
-        return local_paths
+        local_paths_mapping = {
+            c: local_root / p.relative_to(remote_root)
+            for c, p in zip(contexts, absolute_remote_paths)
+        }
+        return local_paths_mapping
 
     def download_files(
         self,
         contexts: Iterifiable[GSBrowserContext],
         local_folder_path: PathLike = None,
-        shared_root: PathLike = None,
-        exists_ok=False,
+        remote_root: PathLike = None,
+        existing_handling: Literal["skip", "overwrite", "raise"] = "skip",
     ) -> None:
         """Analogue of `download_file` for multiple files use it for convenience
 
@@ -547,22 +576,25 @@ class GSBrowser:
         ----------
         contexts : Iterifiable[GSBrowserContextDTO]
             contexts to download from, may be a single context or a list of contexts
-        local_paths : Iterifiable[PathLike], optional
-            local file paths to download blobs to, corresponding contexts, must have the same length as `contexts`,
-            if None, then use default paths which correspond to {download_dir}/{prefix}, by default None
-        exists_ok : bool, optional
-            if True, then skip downloading if file already exists, if False then raise FileExistsError, by default False
+        local_folder_path : PathLike, optional
+            local folder path to download blobs to, if None, then use default path which corresponds to {download_dir}/{prefix}, by default None
+        remote_root : PathLike, optional
+            remote root path, if None, then shared root of all remote paths is used, by default None
+        existing_handling : Literal[&quot;skip&quot;, &quot;overwrite&quot;, &quot;raise&quot;], optional
+            how to handle existing files:
+                - &#39;skip&#39; - skip existing files
+                - &#39;overwrite&#39; - overwrite existing files
+                - &#39;raise&#39; - raise error if file already exists, by default &#39;skip&#39;
         """
-        contexts = list([self._parse_context(c) for c in listify(contexts)])
-        local_paths = self._prepare_local_paths(
-            contexts, local_folder_path, shared_root
+        local_paths_mapping = self.get_local_paths_mapping(
+            contexts, local_folder_path, remote_root
         )
         for context, local_path in tqdm(
-            zip(contexts, local_paths),
-            total=len(contexts),
+            local_paths_mapping.items(),
+            total=len(local_paths_mapping),
             desc="Downloading files from GCP",
         ):
-            self.download_file(context, local_path, exists_ok)
+            self.download_file(context, local_path, existing_handling)
 
     def upload_file(
         self, local_path: PathLike, context: GSBrowserContext, exists_ok=False
