@@ -1,37 +1,79 @@
 {
-  "detections": {
-    "desc": "Detections of different distresses and objects in the frame processed by client device",
-    "path": "detections.json"
-  },
-  "device": {
-    "desc": "Device information, camera params, etc.",
-    "path": "device.txt"
-  },
-  "gps": { "desc": "GPS information from the device", "path": "gps.csv" },
-  "heading": {
-    "desc": "Heading (direction) information from the device",
-    "path": "heading.csv"
-  },
-  "motion": {
-    "desc": "Motion information from the device, e.g. acceleration, rotation, etc.",
-    "path": "motion.csv"
-  },
-  "frames_wide": {
-    "desc": "Frames captured by the wide camera (main camera with higher quality and lower fps), including timestamp, exposure, iso and system time",
-    "path": "times_full_2.json"
-  },
-  "frames_ultrawide": {
-    "desc": "Frames captured by the ultra wide camera (wider camera with lower quality and higher fps), including timestamp, exposure, iso and system time",
-    "path": "times_full.json"
-  },
-  "video_wide": {
-    "desc": "Video captured by the wide camera (main camera with higher quality and lower fps)",
-    "path": "video_2",
-    "coded": "mp4"
-  },
-  "video_ultrawide": {
-    "desc": "Video captured by the ultra wide camera (wider camera with lower quality and higher fps)",
-    "path": "video",
-    "coded": "mp4"
+  "desc": "Recslam file structure",
+  "nodes": {
+    "common": {
+      "desc": "All the information about device, not specific to certain camera",
+      "nodes": {
+        "detections": {
+          "desc": "Detections of different distresses and objects in the frame processed by client device",
+          "path": "detections.json"
+        },
+        "device": {
+          "desc": "Device information, camera params, etc.",
+          "path": "device.txt"
+        },
+        "gps": { "desc": "GPS information from the device", "path": "gps.csv" },
+        "heading": {
+          "desc": "Heading (direction) information from the device",
+          "path": "heading.csv"
+        },
+        "motion": {
+          "desc": "Motion information from the device, e.g. acceleration, rotation, etc.",
+          "path": "motion.csv"
+        },
+        "snapshots": {
+          "desc": "Snapshots of the video for composition",
+          "path": "snapshots.zip"
+        }
+      }
+    },
+    "camera_wide": {
+      "desc": "Files related to wide camera (_2 suffix) - main camera with higher quality and lower fps",
+      "nodes": {
+        "video": {
+          "desc": "Video captured by the wide camera (main camera with higher quality and lower fps)",
+          "path": "video_2"
+        },
+        "timestamps": {
+          "desc": "Timestamps of frames captured by the wide camera",
+          "path": "times_full_2.json"
+        },
+        "timestamps_old": {
+          "desc": "Timestamps of frames captured by the wide camera (old format)",
+          "path": "times_2.txt"
+        },
+        "raw_data": {
+          "desc": "Raw data captured by the wide camera",
+          "path_pattern": {
+            "desc": "Batch of raw video data",
+            "path": "^video_data_\\d+\\.data_2$"
+          }
+        }
+      }
+    },
+    "camera_ultrawide": {
+      "desc": "Files related to ultrawide camera (no suffix) - secondary, more wide camera with lower quality and higher fps",
+      "nodes": {
+        "video": {
+          "desc": "Video captured by the ultrawide camera ",
+          "path": "video"
+        },
+        "timestamps": {
+          "desc": "Timestamps of frames captured by the ultrawide camera",
+          "path": "times_full.json"
+        },
+        "timestamps_old": {
+          "desc": "Timestamps of frames captured by the ultrawide camera (old format)",
+          "path": "times.txt"
+        },
+        "raw_data": {
+          "desc": "Raw data captured by the ultrawide camera",
+          "path_pattern": {
+            "desc": "Batch of raw video data",
+            "path": "^video_data_\\d+\\.data$"
+          }
+        }
+      }
+    }
   }
 }
