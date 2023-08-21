@@ -222,6 +222,10 @@ class Directory:
         )
 
     @property
+    def is_initialized(self):
+        return not self._is_tmp or self._lazy_tmp_dir is not None
+
+    @property
     def path(self) -> Path:
         """Path to directory. If temporary, will be created on first call.
 
@@ -230,7 +234,7 @@ class Directory:
         Path
             Path to directory
         """
-        if self._is_tmp and self._lazy_tmp_dir is None:
+        if not self.is_initialized:
             self._init_tmp_dir()
         return self._path
 
