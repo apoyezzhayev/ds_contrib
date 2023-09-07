@@ -158,7 +158,7 @@ class GSBrowser:
         project: str,
         credentials: PathLike,
         default_context: GSBrowserContext = None,
-        downloads_dir: PathLike = None,
+        downloads_dir: Directory | None = None,
     ):
         """Google Storage Browser
 
@@ -186,9 +186,8 @@ class GSBrowser:
             default_context  # TODO: add handling of all types of contexts
         )
         self._buckets = None
-        self._downloads_dir = Directory(
-            downloads_dir,
-            temporary=downloads_dir is None or not Path(downloads_dir).exists(),
+        self._downloads_dir = (
+            downloads_dir if downloads_dir else Directory(Path.cwd(), temporary=True)
         )
 
     @property
@@ -272,16 +271,40 @@ class GSBrowser:
         check_existence: bool = False,
         is_dir: bool = True,
     ):
-        new_context = self._parse_context(context, is_dir=is_dir)
+        new_context = self.parse_context(context, is_dir=is_dir)
         if check_existence and not self.is_present(new_context):
             raise FileNotFoundError(f"No such file or directory: {context.path}")
         if self._context:
             new_context.set_prev(self._context)
         self._context = new_context
 
-    def _parse_context(
+    def parse_context(
         self, context: GSBrowserContext, is_dir: bool = None
     ) -> GSBrowserContextDTO:
+        """Parse context from str, Path, URI, URL, GSBrowserContextDTO or None to GSBrowserContextDTO
+
+        Parameters
+        ----------
+        context : GSBrowserContext
+            context to parse
+        is_dir : bool, optional
+            if True then consider context as directory, if False then consider context as file,
+            if None then infer from the prefix (if it ends with `/`), by default None
+            WARNING: if context is Path type, then leading `/` is ignored, so it is impossible to infer if it is a file
+                or directory and `is_dir` must be specified
+
+        Returns
+        -------
+        GSBrowserContextDTO
+            parsed context
+
+        Raises
+        ------
+        ValueError
+            if context is not GSBrowserContext, URI, URL or str
+        ValueError
+            if context is str and is not absolute path starting from bucket or current context is not set
+        """
         if context is None:
             return self._context
         if isinstance(context, GSBrowserContextDTO):
@@ -360,7 +383,7 @@ class GSBrowser:
         """
 
         # list subdirectories in prefix directory with depth = 1
-        context = self._parse_context(context, is_dir=as_dir)
+        context = self.parse_context(context, is_dir=as_dir)
 
         delimiter = "/" if not recursive else None
         blobs = self.storage_client.list_blobs(
@@ -404,7 +427,7 @@ class GSBrowser:
         dict[str, list[GSBrowserContextDTO]]
             dictionary with keys `files` and `folders` with lists of GSBrowserContextDTO files and folders respectively
         """
-        context = self._parse_context(context, is_dir=as_dir)
+        context = self.parse_context(context, is_dir=as_dir)
 
         # if check_existence:
         #     if not self.is_present(context):
@@ -550,7 +573,7 @@ class GSBrowser:
         local_root = (
             Path(local_root).absolute().resolve() if local_root else self.downloads_path
         )
-        contexts = [self._parse_context(c) for c in listify(contexts)]
+        contexts = [self.parse_context(c) for c in listify(contexts)]
         absolute_remote_paths = list(map(lambda p: Path("/" + p.path), contexts))
         remote_root = (
             remote_root
@@ -624,7 +647,7 @@ class GSBrowser:
             raise FileNotFoundError(f"No such file or directory: {local_path}")
         if context is None:
             raise ValueError("Context must be specified")
-        context = self._parse_context(context, is_dir=False)
+        context = self.parse_context(context, is_dir=False)
         blob = self.storage_client.bucket(context.bucket).blob(context.prefix)
         if blob.exists() and not exists_ok:
             raise FileExistsError(f"File {context} already exists")
@@ -670,7 +693,7 @@ class GSBrowser:
         ValueError
             If duplicates_handling is not one of &#39;overwrite&#39;, &#39;skip&#39;, &#39;error&#39;
         """
-        gcs_destination_root = self._parse_context(gcs_destination_root, is_dir=True)
+        gcs_destination_root = self.parse_context(gcs_destination_root, is_dir=True)
         local_paths = list(list_paths(local_paths, recursive=recursive))
         contexts = prepare_paths_for_transfer(
             local_paths,
@@ -678,7 +701,7 @@ class GSBrowser:
             target_root=gcs_destination_root.path,
             local_shared_root=local_shared_root,
         )
-        contexts = [self._parse_context(context, is_dir=False) for context in contexts]
+        contexts = [self.parse_context(context, is_dir=False) for context in contexts]
         for local_path, context in tqdm(
             zip(local_paths, contexts),
             total=len(contexts),
