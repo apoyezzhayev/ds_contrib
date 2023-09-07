@@ -8,7 +8,9 @@ website:
           - core/01_paths.ipynb
           - core/02_plotting.ipynb
           - core/03_video.ipynb
-          - core/file_structure.ipynb
+          - core/04_file_structure.ipynb
+          - core/05_road_quality.ipynb
+          - core/06_recslam_catalog.ipynb
       - section: tools
         contents:
           - tools/gscloud_browser.ipynb
