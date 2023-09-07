@@ -2,15 +2,23 @@
 
 # %% ../../nbs/core/00_core.ipynb 3
 from __future__ import annotations
+
+import inspect
+import logging
 import os
-from typing import Any, TypeVar, Iterable, Literal
+from typing import Any, Callable, Container, Iterable, Literal, Mapping, TypeVar
+
+from fastcore.test import test_fail
 
 # %% auto 0
-__all__ = ['T', 'PathLike', 'Iterifiable', 'get_class_vars', 'get_class_name', 'get_object_class_name', 'iterify', 'listify',
-           'tuplify', 'dictify_with_names']
+__all__ = ['logger', 'T', 'K', 'PathLike', 'Iterifiable', 'get_class_vars', 'get_class_name', 'get_object_class_name', 'iterify',
+           'listify', 'tuplify', 'dictify_with_names', 'handle_existing', 'hadnle_existing_key', 'exclusive_args']
 
 # %% ../../nbs/core/00_core.ipynb 4
+logger = logging.getLogger(__name__)
+
 T = TypeVar("T")
+K = TypeVar("K")
 
 PathLike = str | os.PathLike | None
 Iterifiable = Iterable[T] | T | None
@@ -90,9 +98,6 @@ def iterify(obj: object) -> Iterable:
         return [obj]
 
 # %% ../../nbs/core/00_core.ipynb 12
-from typing import Mapping
-
-
 def listify(
     obj: object,
     nested_collections: bool = False,
@@ -219,3 +224,182 @@ def dictify_with_names(
     else:
         data = listify(data)
         return {f"{default_name}_{i}": d for i, d in enumerate(data)}
+
+# %% ../../nbs/core/00_core.ipynb 26
+def handle_existing(
+    obj: K | T,
+    existence_predicate: Callable[[T], bool],
+    must_exist: bool = True,
+    obj_processor: Callable[[K], T] | None = None,
+    obj_type_name: str = "object",
+    strategy: Literal["skip", "overwrite", "raise"] = "skip",
+    error_type: type[Exception] = ValueError,
+) -> T | None:
+    """Handle existing object in the way specified by strategy.
+
+    Parameters
+    ----------
+    obj : K | T
+        object to be handled, may be key, filename, etc.
+    existence_predicate : Callable[[T], bool]
+        function that returns True if key  (object) exists, False otherwise
+    must_exist : bool, optional
+        whether the object must exist or not,
+            if False and object does not exist, the strategy is applied,
+            if True and object does exist, the strategy is not applied, by default True
+    obj_processor : Callable[[K], T] | None, optional
+        function that converts object to the key used in predicate,
+        if None, obj is used itself, by default None
+    obj_type_name : str, optional
+        name of the object type, that will be used in logging, by default "object"
+    strategy : Literal['skip', 'overwrite', 'raise'], optional
+        how to handle existing object:
+        - "skip": skip the object (return None)
+        - "overwrite": overwrite the object (return path)
+        - "raise": raise an error (raise ExistsError)
+        (default: "skip")
+    error_type : type[Exception], optional
+        type of error to raise if strategy is "raise", by default ValueError
+
+    Returns
+    -------
+    K | T | None:
+        if object must be skipped, returns None, if overwrite or object does not exist, returns object
+
+    Raises
+    ------
+    ValueError
+        if existing_handling is not one of "skip", "overwrite", or "raise"
+    """
+    obj: T = obj_processor(obj) if obj_processor else obj  # type: ignore
+    exists = not existence_predicate(obj) if must_exist else existence_predicate(obj)
+    if exists:
+        msg = f"{obj_type_name.capitalize()} `{str(obj)}` {'does not exist' if must_exist else 'already exists'}"
+        if strategy == "skip":
+            logger.info(f"{msg}, skipping")
+            return None
+        elif strategy == "overwrite":
+            logger.warning(f"{msg}, {'creating' if must_exist else 'overwriting'}")
+            return obj
+        elif strategy == "raise":
+            raise error_type(f"{msg}")
+        else:
+            raise ValueError(f"Unknown existing_handling strategy: `{strategy}`")
+    else:
+        return obj
+
+
+def hadnle_existing_key(
+    key: K,
+    container: Container,
+    must_exist: bool = True,
+    strategy: Literal["skip", "overwrite", "raise"] = "skip",
+) -> K | None:
+    """Handle existing key in the way specified by strategy.
+
+    Parameters
+    ----------
+    key : K
+        key to be handled
+    container : Container
+        container to check if key exists in
+    must_exist : bool, optional
+        whether the object must exist or not, if False and object does not exist the strategy is applied, by default True
+    strategy : Literal['skip', 'overwrite', 'raise'], optional
+        how to handle existing key:
+        - "skip": skip the key (return None)
+        - "overwrite": overwrite the key (return key)
+        - "raise": raise an error (raise ExistsError)
+        (default: "skip")
+
+    Returns
+    -------
+    K | None:
+        if key must be skipped, returns None, if overwrite or key does not exist, returns key
+
+    Raises
+    ------
+    KeyError
+        if key exists and existing_handling is "raise"
+    ValueError
+        if existing_handling is not one of "skip", "overwrite", or "raise"
+    """
+    return handle_existing(
+        key,
+        lambda k: k in container,
+        must_exist=must_exist,
+        obj_type_name="key",
+        strategy=strategy,
+        error_type=KeyError,
+    )
+
+# %% ../../nbs/core/00_core.ipynb 32
+def exclusive_args(
+    exclusive_arg_names: Iterifiable[str] = [],
+    may_be_empty: bool = False,
+    empty_value: Any = None,
+):
+    """Decorator that ensures that only one of the arguments is passed.
+
+    Parameters
+    ----------
+    exclusive_arg_names : Iterifiable[str], optional
+        list of argument names that are exclusive, by default [], must conform to argument names of the decorated function
+    may_be_empty : bool, optional
+        whether the list of exclusive arguments passed to function can be empty, by default False
+    empty_value : Any, optional
+        value that is considered empty, by default None
+
+    Returns
+    -------
+    Callable
+        decorated function
+
+    Raises
+    ------
+    ValueError
+        if more than one of the exclusive arguments is passed
+    ValueError
+        if none of the exclusive arguments is passed and may_be_empty is False
+    """
+
+    exclusive_arg_names: list[str] = listify(exclusive_arg_names)
+
+    def decorator(func):
+        parameters = inspect.signature(func).parameters
+        may_be_positional_arg_names = [
+            name
+            for name, param in parameters.items()
+            if param.kind == param.POSITIONAL_OR_KEYWORD
+        ]
+        positions_of_exclusive_arg_names = set(
+            [
+                ind
+                for ind, name in enumerate(may_be_positional_arg_names)
+                if name in exclusive_arg_names
+            ]
+        )
+
+        def wrapper(*args, **kwargs):
+            count = 0
+            for ind, arg in enumerate(args):
+                if ind in positions_of_exclusive_arg_names and arg != empty_value:
+                    count += 1
+            for arg_name, arg in kwargs.items():
+                if arg_name in exclusive_arg_names and arg != empty_value:
+                    count += 1
+            if not may_be_empty and count == 0:
+                raise ValueError(
+                    "Exactly one of the arguments must be passed, but no exclusive argument provided from: "
+                    + ", ".join(exclusive_arg_names)
+                )
+            if count > 1:
+                raise ValueError(
+                    "Only one of the arguments can be passed from: "
+                    + ", ".join(exclusive_arg_names)
+                )
+            return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
