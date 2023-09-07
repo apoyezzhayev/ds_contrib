@@ -3,23 +3,233 @@
 # %% ../../../nbs/core/03_video.ipynb 3
 from __future__ import annotations
 
+import json
+import logging
+import math
+import subprocess
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 import cv2
+import pandas as pd
 from tqdm.auto import tqdm
 
-from ..paths import PathLike
+from ..paths import Directory, PathLike, pathify
+from ..utils import exclusive_args
 
 # %% auto 0
-__all__ = ['sample_frames_from_video']
+__all__ = ['logger', 'get_video_metadata', 'IFramesSampler', 'FramesSamplerUniform', 'directorify', 'sample_frames_from_video']
 
 # %% ../../../nbs/core/03_video.ipynb 4
+logger = logging.getLogger("__name__")
+
+# %% ../../../nbs/core/03_video.ipynb 6
+def get_video_metadata(video_path):
+    cmd = [
+        "ffprobe",
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
+        "-show_format",
+        "-show_streams",
+        video_path,
+    ]
+
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    metadata = json.loads(result.stdout)
+    assert len(metadata["streams"]) == 1, "Video should have only one stream"
+    fps = metadata["streams"][0]["r_frame_rate"].split("/")
+    fps = int(fps[0]) / int(fps[1])
+    video_metadata = {
+        "file": {
+            "filename": metadata["format"]["filename"],
+            "format_name": metadata["format"]["format_name"],
+            "size": int(metadata["format"]["size"]),
+            "creation_time": metadata["format"]["tags"]["creation_time"],
+        },
+        "video": {
+            "codec_name": metadata["streams"][0]["codec_name"],
+            "width": int(metadata["streams"][0]["width"]),
+            "height": int(metadata["streams"][0]["height"]),
+            "duration": float(metadata["streams"][0]["duration"]),
+            "fps": float(fps),
+            "frame_count": int(metadata["streams"][0]["nb_frames"]),
+        },
+    }
+    return video_metadata
+
+# %% ../../../nbs/core/03_video.ipynb 10
+class IFramesSampler(ABC):
+    def __init__(
+        self,
+        video_metadata: dict,
+        start_frame: int = 0,
+        end_frame: int | None = None,
+        max_frames: int | None = None,
+        batch_size: int | None = None,
+    ):
+        self._video_metadata = video_metadata
+
+        video_total_frames = self._video_metadata["video"]["frame_count"]
+        self._original_fps: float = self._video_metadata["video"]["fps"]
+
+        self._start_frame = start_frame
+        self._end_frame = end_frame if end_frame else video_total_frames
+
+        self._total_frames = self._end_frame - self._start_frame
+        self._max_frames = max_frames if max_frames else self._total_frames
+
+        self._frame_counter = 0
+        self._batch_counter = 0
+        self._current_frame = self._start_frame
+
+        self._batch_size = batch_size
+
+        # Validate args
+        assert (
+            0 <= start_frame < video_total_frames
+        ), "start_frame should be in [0, frame_count)"
+        assert (
+            0 < self._end_frame <= video_total_frames
+        ), "end_frame should be in [1, frame_count)"
+        assert (
+            start_frame < self._end_frame
+        ), "start_frame should be less than end_frame"
+
+    def _reset_iter(self):
+        # reset iterator and raise StopIteration
+        self._current_frame = self._start_frame
+        self._frame_counter = 0
+        self._batch_counter = 0
+
+    @property
+    def batch_size(self):
+        return self._batch_size
+
+    @abstractmethod
+    def _next_frame_ind(self) -> int:
+        raise NotImplementedError
+
+    def __iter__(self):
+        while True:
+            if (
+                self._frame_counter == (self._max_frames)
+                or self._current_frame < 0
+                or self._current_frame >= self._end_frame
+            ):
+                self._reset_iter()
+                break
+
+            yield self._batch_counter, self._current_frame
+            self._frame_counter += 1
+            if (
+                self._batch_size is not None
+                and self._frame_counter % self._batch_size == 0
+                and self._frame_counter != 0
+            ):
+                self._batch_counter += 1
+            self._current_frame = self._next_frame_ind()
+
+    @property
+    @abstractmethod
+    def total_frames(self) -> int | None:
+        raise NotImplementedError
+
+
+class FramesSamplerUniform(IFramesSampler):
+    # TODO[Low]: add support for start_time, end_time
+
+    @exclusive_args(["n_frames", "frame_step", "time_step", "fps"])
+    def __init__(
+        self,
+        video_metadata: dict,
+        frame_step: int | None = None,
+        n_frames: int | None = None,
+        fps: float | None = None,
+        time_step: float | None = None,
+        start_frame: int = 0,
+        end_frame: int | None = None,
+        max_frames: int | None = None,
+        batch_size: int | None = None,
+    ):
+        super().__init__(
+            video_metadata,
+            start_frame=start_frame,
+            end_frame=end_frame,
+            max_frames=max_frames,
+            batch_size=batch_size,
+        )
+        self._current_frame_float = self._current_frame
+        self._frame_step: float = self._init_frame_step(
+            frame_step, n_frames, fps, time_step
+        )
+
+    @property
+    def total_frames(self) -> int | None:
+        return math.ceil(self._max_frames / self._frame_step)
+
+    def _init_frame_step(
+        self,
+        frame_step: int | None,
+        n_frames: int | None,
+        fps: float | None,
+        time_step: float | None,
+    ):
+        if frame_step:
+            if frame_step < 1:
+                raise ValueError(
+                    f"frame_step=`{frame_step}` is too small cannot be < `1`"
+                )
+            return frame_step
+        elif n_frames:
+            n_frames = max(n_frames, 1)  # n_frames should be at least 1
+            return max(self._total_frames / n_frames, 1)
+        elif fps:
+            frame_step = self._original_fps / fps
+            if frame_step < 1:
+                raise ValueError(
+                    f"fps=`{fps}` is too high, because original fps=`{self._original_fps}`"
+                )
+            if not math.isclose(frame_step, round(frame_step), rel_tol=0.1):
+                raise ValueError(
+                    f"new fps `{fps}` cannot be achieved from original fps `{self._original_fps}` without precision loss <10%, use such `fps` that `{self._original_fps}/{fps}` is close to integer"
+                )
+            return frame_step
+        elif time_step:
+            frame_step = time_step * self._original_fps
+            if frame_step < 1:
+                raise ValueError(
+                    f"time_step=`{time_step}` is too small, because original time_step is `{1/self._original_fps}`"
+                )
+            if not math.isclose(frame_step, round(frame_step), rel_tol=0.1):
+                raise ValueError(
+                    f"new time_step `{time_step}` cannot be achieved from original timestap `{1/self._original_fps}` without precision loss <10%, use such `time_step` that `time_step'/'{1/self._original_fps}` is close to integer"
+                )
+            return frame_step
+        else:
+            raise ValueError(
+                "One of the following args should be provided: frame_step, n_frames, fps, time_step"
+            )
+
+    def _next_frame_ind(self) -> int:
+        self._current_frame_float = self._current_frame_float + self._frame_step
+        return round(self._current_frame_float)
+
+# %% ../../../nbs/core/03_video.ipynb 12
+def directorify(d: PathLike | Directory) -> Directory:
+    if isinstance(d, Directory):
+        return d
+    else:
+        return Directory(d, temporary=False)
+
+
 def sample_frames_from_video(
     input_video: PathLike,
-    output_frames_dir: PathLike,
-    start_frame=0,
-    max_frames=None,
-    time_delta=5,
+    output_frames_dir: Directory | PathLike,
+    video_metadata: dict | None = None,
+    sampler: IFramesSampler | None = None,
+    with_catalog: bool = True,
 ):
     """Sample frames from a video and save them to a directory.
 
@@ -46,16 +256,20 @@ def sample_frames_from_video(
         if batch index (number of batches) is too large, max is 9999. Split video to shorter clips.
     """
     # Open the video file
-    output_frames_dir = Path(output_frames_dir)
-    output_frames_dir.mkdir(parents=True, exist_ok=True)
-    cap = cv2.VideoCapture(str(input_video))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    num_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    max_frames = max_frames or num_frames
-    # get resolution
-    frame_delta = int(fps * time_delta)
-    for frame_ind in tqdm(
-        range(start_frame, num_frames, frame_delta), desc="Sampling frames", leave=False
+    output_frames_dir: Directory = directorify(output_frames_dir)
+    input_video_path = pathify(input_video)
+
+    if video_metadata is None:
+        logger.info(f"Reaing video metadata from {input_video_path}")
+        video_metadata = get_video_metadata(input_video)
+    if sampler is None:
+        sampler = FramesSamplerUniform(video_metadata, frame_step=1)
+
+    cap = cv2.VideoCapture(str(input_video_path))
+
+    frames_catalog_dict = {}
+    for batch_ind, frame_ind in tqdm(
+        sampler, desc="Sampling frames", leave=False, total=sampler.total_frames
     ):
         # Set the frame position
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_ind)
@@ -63,18 +277,31 @@ def sample_frames_from_video(
         ret, frame = cap.read()
         if not ret:
             break
-        batch_ind = frame_ind // (max_frames * frame_delta)
+
         if batch_ind > 9999:
             raise ValueError(
                 f"Batch index {batch_ind} is too large, max is 9999. Split video to shorter clips."
             )
         # Save the frame
-        batch_dir = output_frames_dir / f"part_{batch_ind:04d}"
-        batch_dir.mkdir(parents=True, exist_ok=True)
+        if not with_catalog:
+            batch_dir = output_frames_dir.path / f"part_{batch_ind:04d}"
+            batch_dir.mkdir(parents=True, exist_ok=True)
+            frame_path = str(batch_dir / f"{frame_ind:08d}.jpg")
+        else:
+            frame_path = str(output_frames_dir.path / f"{frame_ind:08d}.jpg")
+            frames_catalog_dict[frame_ind] = {
+                "batch_ind": batch_ind,
+                "frame_path": Path(frame_path).name,
+                "timestamp": cap.get(cv2.CAP_PROP_POS_MSEC),
+            }
         cv2.imwrite(
-            str(batch_dir / f"{frame_ind:08d}.jpg"),
+            frame_path,
             frame,
             [cv2.IMWRITE_JPEG_QUALITY, 100],
         )
 
     cap.release()
+
+    if with_catalog:
+        frames_catalog_df = pd.DataFrame.from_dict(frames_catalog_dict, orient="index")
+        frames_catalog_df.to_csv(output_frames_dir.path / "frames_catalog.csv")
