@@ -11,14 +11,15 @@ import weakref as _weakref
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Iterable
+from typing import Iterable, Literal
 
 from pydantic import PathNotADirectoryError
 
-from .utils import Iterifiable, iterify
+from .utils import Iterifiable, handle_existing, iterify
 
 # %% auto 0
-__all__ = ['logger', 'PathLike', 'list_paths', 'get_dir', 'shared_root', 'prepare_paths_for_transfer', 'Directory']
+__all__ = ['logger', 'PathLike', 'list_paths', 'get_dir', 'shared_root', 'prepare_paths_for_transfer', 'Directory', 'pathify',
+           'handle_existing_path']
 
 # %% ../../nbs/core/01_paths.ipynb 4
 logger = logging.getLogger(__name__)
@@ -210,6 +211,7 @@ class Directory:
             Path to directory, if None, will be created temporary in current working directory, by default None
         temporary : bool, optional
             If True, directory will be deleted on exit, by default True
+            CAUTION: If you set it True and provide path, it will create the directory with random uuid under the path
         """
         self._is_tmp = temporary
 
@@ -243,6 +245,8 @@ class Directory:
             folder = Path.cwd()
         else:
             folder = self._path
+        # Create parent folder if it does not exist
+        Path(folder).mkdir(parents=True, exist_ok=True)
         self._lazy_tmp_dir = TemporaryDirectory(dir=folder)
         self._path = Path(self._lazy_tmp_dir.name).absolute()
         logger.info(f"Created temporary directory for downloads: `{self._path}`")
@@ -329,3 +333,91 @@ class Directory:
                 logger.info(f"Tmp directory was not initialized, skipping cleanup")
         else:
             logger.info(f"Directory `{self._path}` is persistent, skipping cleanup")
+
+# %% ../../nbs/core/01_paths.ipynb 20
+def pathify(
+    p: PathLike, none_handling: Literal["none", "raise", "cwd"] = "none"
+) -> Path:
+    """Converts a path-like object to a Path object.
+
+    If p is None, returns None, raises an error, or returns the current working directory, depending on the value of none_handling.
+
+    Parameters
+    ----------
+    p : PathLike
+        path-like object to convert to a Path object
+    none_handling : Literal[&#39;none&#39;, &#39;raise&#39;, &#39;cwd&#39;], optional
+        How to handle a None value for p:
+        - 'none': return None
+        - 'raise': raise a ValueError
+        - 'cwd': return the current working directory
+        (default: 'none')
+
+    Returns
+    -------
+    Path
+        Path object corresponding to p, or None if p is None and none_handling is 'none'
+
+    Raises
+    ------
+    ValueError
+        If p is None and none_handling is 'raise'
+    ValueError
+        If none_handling is not one of 'none', 'raise', or 'cwd'
+    """
+    if p is None:
+        if none_handling == "none":
+            return None
+        elif none_handling == "raise":
+            raise ValueError("Path is None")
+        elif none_handling == "cwd":
+            return Path.cwd()
+        else:
+            raise ValueError(f"Invalid none_handling: {none_handling}")
+    else:
+        return Path(p)
+
+# %% ../../nbs/core/01_paths.ipynb 21
+def handle_existing_path(
+    p: PathLike,
+    strategy: Literal["skip", "overwrite", "raise"] = "skip",
+    must_exist: bool = False,
+):
+    """Handle existing files
+
+    Parameters
+    ----------
+    p : PathLike
+        input path
+    strategy : Literal['skip', 'overwrite', 'raise'], optional
+        how to handle existing files:
+        - "skip": skip the file (return None)
+        - "overwrite": overwrite the file (return path)
+        - "raise": raise an error (raise FileExistsError)
+        (default: "skip")
+    must_exist : bool, optional
+        if True, apply strategy to non existing files,
+        if False, apply strategy to existing files
+        (default: False)
+
+    Returns
+    -------
+    Path | None:
+        if path must be skipped, returns None, otherwise returns path
+
+    Raises
+    ------
+    FileExistsError
+        if file exists and existing_handling is "raise"
+    ValueError
+        if existing_handling is not one of "skip", "overwrite", or "raise"
+    """
+    return handle_existing(
+        p,
+        lambda p: p.exists(),
+        must_exist=must_exist,
+        obj_processor=lambda p: pathify(p, none_handling="raise"),
+        obj_type_name="file",
+        strategy=strategy,
+        error_type=FileExistsError,
+    )
