@@ -149,4 +149,7 @@ checklink/cookies.txt
 
 # Quarto
 .quarto
+
+# Data
 dev_notebooks/data/*
+data/*
